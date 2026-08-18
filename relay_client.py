@@ -24,6 +24,15 @@ class RelayClient:
     impulsu to nie skróci, ale zostawia w retained statusie kanału jednoznaczny
     ślad "ta usługa już tego nie chce" - inaczej ostatnią rzeczą widoczną na
     topicu byłby nasz flash_on.
+
+    Zmierzone na module (2026-08-18), żeby nikt do tego pomysłu nie wracał:
+
+    - `off` w trakcie impulsu nie robi nic; kanał gaśnie dopiero po `duration`
+      od ostatniego `flash_on`.
+    - `flash_off` NIE jest szybszym gaszeniem. To impuls odwrotny: gasi cewkę na
+      `duration`, po czym ją **załącza**. Użyty do wyłączenia grzałki kończy się
+      grzałką włączoną - i to bez niczyjego leasingu, więc nikt jej nie pilnuje.
+      Jedyne wyłączenie, na jakie tu można liczyć, to przestać pingować.
     """
 
     def __init__(self, publish, heaters, topic_root, module, service,

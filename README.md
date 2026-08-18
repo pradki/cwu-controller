@@ -186,6 +186,15 @@ A released heater also gets an explicit `off` with a short TTL. That cannot shor
 hardware pulse, but it leaves an unambiguous "this service no longer wants this channel" in the
 channel's retained status - otherwise the last thing anyone would see there is our `flash_on`.
 
+Measured on the board (2026-08-18), because both of these look like shortcuts and neither is:
+
+- `off` during a running pulse does nothing at all. The channel drops `duration` seconds after
+  the last `flash_on`, and not before.
+- **`flash_off` is not a faster off.** It is the *inverse* pulse: it opens the coil for
+  `duration` and then **closes it again**. Used to switch a heater off, it leaves the heater
+  running - and running without any lease behind it, so nothing is watching it. Stopping the
+  pings is the only off there is.
+
 The controller keeps its own model of what the hardware is doing (a pulse lasts
 `FLASH_DURATION` from the last ping) and uses *that* for the power balance, rather than waiting
 for the gateway's status topic to come back. The retained status is subscribed to anyway and

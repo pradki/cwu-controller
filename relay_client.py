@@ -29,10 +29,11 @@ class RelayClient:
 
     - `off` w trakcie impulsu nie robi nic; kanał gaśnie dopiero po `duration`
       od ostatniego `flash_on`.
-    - `flash_off` NIE jest szybszym gaszeniem. To impuls odwrotny: gasi cewkę na
-      `duration`, po czym ją **załącza**. Użyty do wyłączenia grzałki kończy się
-      grzałką włączoną - i to bez niczyjego leasingu, więc nikt jej nie pilnuje.
-      Jedyne wyłączenie, na jakie tu można liczyć, to przestać pingować.
+    - `flash_off` NIE jest szybszym gaszeniem. To impuls odwrotny: rozwiera cewkę
+      na `duration`, po czym ją **zwiera** i tak zostawia. Sensem tej komendy jest
+      "przerwij na chwilę pracę urządzenia", więc w gatewayu jest ona zarazem
+      roszczeniem "trzymaj on" - użyta na grzałce zostawiłaby ją włączoną na czas
+      swojego TTL. Jedyne wyłączenie, na jakie tu można liczyć, to przestać pingować.
     """
 
     def __init__(self, publish, heaters, topic_root, module, service,

@@ -1,0 +1,9 @@
+# Lokalna konfiguracja z prawdziwymi adresami IP z sieci lokalnej - szablon w config.example.py
+config.py
+
+# Python
+__pycache__/
+*.py[cod]
+
+venv/
+.venv/

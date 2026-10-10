@@ -1,6 +1,7 @@
 # cwu_controller.py
 import logging
 import time
+from datetime import datetime
 
 LOG = logging.getLogger("cwu")
 
@@ -12,6 +13,11 @@ DEFAULT_RULES = [
     (50, 4000),
     (40, 5000),
 ]
+
+# Marzec-wrzesień: jak dotychczas (DEFAULT_RULES + progi histerezy poniżej).
+# Październik-luty: priorytet ma naładowanie akumulatora, więc grzejemy tylko
+# przy naprawdę dużej nadwyżce - patrz config.py WINTER_* i README.
+DEFAULT_WINTER_MONTHS = frozenset({10, 11, 12, 1, 2})
 
 
 class CWUController:
@@ -29,7 +35,7 @@ class CWUController:
     Sterowanie jest celowo niesymetryczne:
 
     - **W górę powoli**: po jednej grzałce, nie częściej niż `ramp_up_hold`, i tylko
-      jeśli poziom potwierdza zarówno krótka (2 min) jak i długa (15 min) średnia.
+      jeśli poziom potwierdza zarówno krótka (1 min) jak i długa (3 min) średnia.
       Chodzi o to, żeby przy 3 kW średniej nadwyżki chodziły stale 1-2 grzałki, a nie
       raz trzy, raz zero, w rytm chmur.
     - **W dół natychmiast**: zdejmowanie awaryjne nie czeka ani na stabilizację
@@ -44,19 +50,50 @@ class CWUController:
     def __init__(self, params, relay, heater_power=2000, rules=None,
                  hysteresis_rule=(94, -1000), soc_hysteresis_on=95,
                  soc_hysteresis_off=94, pv_hysteresis_on=800, soc_full=99,
+                 winter_rules=None, winter_hysteresis_rule=None,
+                 winter_soc_hysteresis_on=None, winter_soc_hysteresis_off=None,
+                 winter_pv_hysteresis_on=None, winter_soc_full=None,
+                 winter_months=DEFAULT_WINTER_MONTHS,
                  max_temp=85.0, settle_ticks=6, ramp_up_hold=300.0,
                  full_soc_add_below=200.0, shed_discharge_above=None,
                  max_total_load=None, publish_status=None,
-                 status_topic="cave/cwu/status", clock=time.monotonic):
+                 status_topic="cave/cwu/status", clock=time.monotonic,
+                 month_fn=None):
         self.params = params
         self.relay = relay
         self.heater_power = heater_power
-        self.rules = list(rules if rules is not None else DEFAULT_RULES)
-        self.hysteresis_rule = hysteresis_rule
-        self.soc_hysteresis_on = soc_hysteresis_on
-        self.soc_hysteresis_off = soc_hysteresis_off
-        self.pv_hysteresis_on = pv_hysteresis_on
-        self.soc_full = soc_full
+
+        # Marzec-wrzesień ("lato"): parametry przekazane wprost, jak dotychczas.
+        # Październik-luty ("zima"): każdy winter_* bez wartości dziedziczy swój
+        # letni odpowiednik, więc podanie tylko części z nich (np. samych reguł)
+        # nie zostawia reszty na przypadkowych defaultach klasy.
+        self._summer = {
+            "rules": list(rules if rules is not None else DEFAULT_RULES),
+            "hysteresis_rule": hysteresis_rule,
+            "soc_hysteresis_on": soc_hysteresis_on,
+            "soc_hysteresis_off": soc_hysteresis_off,
+            "pv_hysteresis_on": pv_hysteresis_on,
+            "soc_full": soc_full,
+        }
+        self._winter = {
+            "rules": (list(winter_rules) if winter_rules is not None
+                      else list(self._summer["rules"])),
+            "hysteresis_rule": (winter_hysteresis_rule if winter_hysteresis_rule is not None
+                                else self._summer["hysteresis_rule"]),
+            "soc_hysteresis_on": (winter_soc_hysteresis_on if winter_soc_hysteresis_on is not None
+                                  else self._summer["soc_hysteresis_on"]),
+            "soc_hysteresis_off": (winter_soc_hysteresis_off if winter_soc_hysteresis_off is not None
+                                   else self._summer["soc_hysteresis_off"]),
+            "pv_hysteresis_on": (winter_pv_hysteresis_on if winter_pv_hysteresis_on is not None
+                                 else self._summer["pv_hysteresis_on"]),
+            "soc_full": (winter_soc_full if winter_soc_full is not None
+                        else self._summer["soc_full"]),
+        }
+        self.winter_months = frozenset(winter_months)
+        self._month_fn = month_fn or (lambda: datetime.now().month)
+        self.season = None  # ustawione poniżej, i odświeżane co tick
+        self._apply_season()
+
         self.max_temp = max_temp
         self.settle_ticks = settle_ticks
         self.ramp_up_hold = ramp_up_hold
@@ -77,6 +114,22 @@ class CWUController:
         self._settle = 0
         self._last_ramp_up = None   # monotonic ostatniego dołożenia grzałki
         self._last_decision = None  # monotonic ostatniego udanego ticku
+
+    # ================= pora roku =================
+    def _apply_season(self):
+        """Dobiera aktywny komplet reguł/histerezy wg bieżącego miesiąca.
+        Wołane co tick (nie tylko raz przy starcie), żeby przejście
+        luty->marzec albo wrzesień->październik zadziałało samo, bez restartu
+        usługi w środku sezonu."""
+        winter = self._month_fn() in self.winter_months
+        season = self._winter if winter else self._summer
+        self.season = "winter" if winter else "summer"
+        self.rules = list(season["rules"])
+        self.hysteresis_rule = season["hysteresis_rule"]
+        self.soc_hysteresis_on = season["soc_hysteresis_on"]
+        self.soc_hysteresis_off = season["soc_hysteresis_off"]
+        self.pv_hysteresis_on = season["pv_hysteresis_on"]
+        self.soc_full = season["soc_full"]
 
     # ================= bezpieczniki =================
     def _overheat(self):
@@ -199,7 +252,7 @@ class CWUController:
         # Krótka średnia mówi "co jest teraz", długa "ile da się utrzymać" - do
         # góry idziemy tylko na tyle, na ile zgadzają się obie.
         if slow < fast:
-            self.reason = f"{slow_reason} [15 min ogranicza z {fast} do {slow}]"
+            self.reason = f"{slow_reason} [3 min ogranicza z {fast} do {slow}]"
             return slow
         self.reason = fast_reason
         return fast
@@ -273,6 +326,7 @@ class CWUController:
     # ================= tick =================
     def tick(self):
         self.ticks += 1
+        self._apply_season()
         self.params.sample()
 
         overheat, overheat_reason = self._overheat()
@@ -344,6 +398,7 @@ class CWUController:
             "phase_load_avg": [round(lp.average, 1) for lp in p.load_power],
             "phase_load_net": [round(v, 1) for v in self.phase_net_load()],
             "hysteresis": self.hysteresis_active,
+            "season": self.season,
             "samples": p.battery_power.samples,
             "buff_top_temp": p.buff_top_temp.value if p.buff_top_temp.valid else None,
             "buff_upmid_temp": p.buff_upmid_temp.value if p.buff_upmid_temp.valid else None,

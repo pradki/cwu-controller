@@ -31,7 +31,7 @@ kept behaviourally the same where the behaviour was right and changed in three p
 | Relay access | own TCP connection to the board | MQTT commands to the gateway |
 | Which heater starts | the one with the least accumulated runtime | the one on the least loaded phase |
 | Full battery (SOC > 99 %) | all three heaters at once | probe upward one at a time, shed on discharge |
-| Ramping up | straight to the computed level | one heater per 5 min, capped by a 15-minute average |
+| Ramping up | straight to the computed level | one heater per 5 min, capped by a 3-minute average |
 | Load ceiling | none | shed when the battery lends too much or the inverter's rating is reached |
 | On-time accounting | own CSV writer + runtime counters | the gateway's `counters` topics |
 
@@ -63,6 +63,9 @@ keep a slice of the production.
 | 50 % | 4000 W | |
 | 40 % | 5000 W | Low battery - only a big sunny surplus justifies heating |
 
+This table (`RULES`) is the **March-September** one. **October-February** uses a separate,
+much stricter `WINTER_RULES` - see "Seasonal rules" below.
+
 Worked example: `SOC 85 %`, averaged PV `1.5 kW`, battery charging at `4.2 kW`, no heater
 running. Rule `(80, 1000)` matches, so `level = int((-4200 + 1000) / -2000) = int(1.6) = 1` -
 one heater, and roughly 2.2 kW of charging left for the battery.
@@ -74,7 +77,7 @@ switching on everything, which is how you end up with 6 kW of heaters on a house
 already drawing 6 kW. Instead the controller probes: add **one** heater, wait, and look at
 whether the battery started lending power.
 
-- Battery drawing less than `FULL_SOC_ADD_BELOW` (200 W) on **both** the 2- and 15-minute
+- Battery drawing less than `FULL_SOC_ADD_BELOW` (200 W) on **both** the 1- and 3-minute
   average - the heaters that run are covered by production, so try one more.
 - Battery drawing more than `SHED_DISCHARGE_ABOVE` (2 kW) - drop one, immediately (below).
 - Anything in between - hold. The gap between the two thresholds is deliberate: adding a heater
@@ -84,7 +87,30 @@ whether the battery started lending power.
 **Hysteresis near a full battery.** Above `SOC 95 %` with more than 800 W coming in, a
 `(94, -1000)` rule is prepended - a *negative* PV threshold, which permits pulling up to 1 kW
 out of the battery to keep the water heating. It stays armed until SOC falls back to 94 %,
-because without that latch the heaters would chatter around the 95 % mark.
+because without that latch the heaters would chatter around the 95 % mark. (October-February
+raises this threshold instead of tuning the rule itself - see "Seasonal rules" below.)
+
+### Seasonal rules (October-February prioritizes charging the battery)
+
+March-September uses `RULES`/`HYSTERESIS_RULE`/`SOC_HYSTERESIS_*`/`PV_HYSTERESIS_ON`/`SOC_FULL`
+exactly as described above, unchanged. October-February swaps in a separate
+`WINTER_RULES`/`WINTER_HYSTERESIS_RULE`/`WINTER_SOC_HYSTERESIS_*`/`WINTER_PV_HYSTERESIS_ON`/
+`WINTER_SOC_FULL` set from `config.py`, because in winter the battery charging first matters
+more than diverting every spare watt to hot water:
+
+```python
+WINTER_RULES = [(40, 6000)]   # only soc > 40% and surplus > 6 kW heats at all
+WINTER_SOC_HYSTERESIS_ON = 99   # and WINTER_SOC_FULL = 99: raised high enough that the
+WINTER_SOC_HYSTERESIS_OFF = 98  # "battery full" branch (_level_full_soc) takes over before
+WINTER_PV_HYSTERESIS_ON = 200   # the hysteresis rule would ever actually fire
+```
+
+`CWUController._apply_season()` picks the active set by the current month on **every tick**
+(`WINTER_MONTHS = {10, 11, 12, 1, 2}`), so the March/October boundary takes effect on its own
+without restarting the service. Any `WINTER_*` setting left unset in `config.py` just inherits
+its March-September value - so, for instance, defining only `WINTER_RULES` keeps the regular
+hysteresis behaviour in winter too. The active table is visible in `controller.season`
+(`"summer"`/`"winter"`) and the `season` field of the status payload (below).
 
 ### Averaging, and why up and down are not symmetric
 
@@ -94,13 +120,14 @@ answer different questions:
 
 | Window | Default | Question |
 |---|---|---|
-| Short | 6 samples x 20 s = 2 min | what is happening now |
-| Long | 45 samples x 20 s = 15 min | how much of it can be sustained |
+| Short | 3 samples x 20 s = 1 min | what is happening now |
+| Long | 9 samples x 20 s = 3 min | how much of it can be sustained |
 
-A heater is only added if **both** windows agree it fits. With 3 kW of average surplus that
-means one or two heaters running steadily, instead of three whenever the sun is out and zero
-whenever it is not. Coming down, the short window rules on its own - a real collapse in surplus
-must not wait fifteen minutes to be believed.
+A heater is only added if **both** windows agree it fits. Coming down, the short window rules on
+its own - a real collapse in surplus must not wait for the long window to catch up. Both windows
+are intentionally short (heaters cycling for a couple of minutes, not five to fifteen) -
+`SETTLE_TICKS` is kept in step with the short window so the post-change pause isn't longer than
+the short average itself needs to fully turn over.
 
 Adding is deliberately slow, shedding deliberately fast:
 
@@ -246,9 +273,12 @@ since `config.py` normally holds a real LAN address).
 - **`HEATERS`** - one entry per heater: `name` is the channel alias in the *gateway's* config,
   `phase` is which `load_power_lN` it draws from. Adding a fourth heater is one more entry;
   nothing else assumes there are three.
-- **`RELAY_MODULE`** - the gateway module the aliases live on (`relay_test` by default).
-- **`RULES`**, **`HYSTERESIS_RULE`**, **`SOC_*`**, **`PV_HYSTERESIS_ON`** - the surplus table
-  described above.
+- **`RELAY_MODULE`** - the gateway module the aliases live on (`relay_heating` by default).
+- **`RULES`**, **`HYSTERESIS_RULE`**, **`SOC_*`**, **`PV_HYSTERESIS_ON`** - the March-September
+  surplus table described above.
+- **`WINTER_RULES`**, **`WINTER_HYSTERESIS_RULE`**, **`WINTER_SOC_*`**, **`WINTER_PV_HYSTERESIS_ON`**,
+  **`WINTER_MONTHS`** - the October-February overrides, see "Seasonal rules" above. Any left unset
+  falls back to its March-September value.
 - **`FLASH_DURATION`** / **`PING_INTERVAL`** - the off-latency vs. outage-tolerance trade-off.
   Keep the pulse comfortably longer than the ping interval.
 - **`AVERAGE_SAMPLES`** / **`AVERAGE_SAMPLES_LONG`** / **`SETTLE_TICKS`** - the two smoothing
@@ -276,7 +306,7 @@ since `config.py` normally holds a real LAN address).
 | `cave/deye/params/load_power_l1`..`l3` | deye-modbus-mqtt | phase balancing (averaged) |
 | `cave/sensors/temperature/buff_top_temp` | tank sensor | overheat cut-out |
 | `cave/sensors/temperature/buff_upmid_temp` | tank sensor | overheat cut-out |
-| `cave/relay/relay_test/cwu_l*/status` | waveshare-mqtt-gateway | verification only |
+| `cave/relay/relay_heating/cwu_l*/status` | waveshare-mqtt-gateway | verification only |
 
 Payloads are the usual `{"value": ...}` shape; a bare number on the topic is accepted too.
 
@@ -301,7 +331,7 @@ controller is doing what it is doing:
   "pv_power_avg": 1500.0, "pv_power_avg_long": 1500.0,
   "load_total_now": 3900.0, "ramp_up_wait": 300.0,
   "phase_load_avg": [2000.0, 1500.0, 400.0], "phase_load_net": [2000.0, 1500.0, -1600.0],
-  "hysteresis": false, "samples": 6,
+  "hysteresis": false, "season": "summer", "samples": 3,
   "buff_top_temp": 60.0, "buff_upmid_temp": 55.0,
   "inverter_data": true, "load_data": true, "ticks": 1, "ts": 1787028801
 }
@@ -326,7 +356,8 @@ for t in tests/test_*.py; do python "$t" || exit 1; done
 | File | Covers |
 |---|---|
 | `tests/test_params.py` | TTL expiry, both average windows, stale data clearing them |
-| `tests/test_levels.py` | the surplus rule table, clamping, hysteresis, the 15-min cap |
+| `tests/test_levels.py` | the surplus rule table, clamping, hysteresis, the 3-min cap |
+| `tests/test_seasonal.py` | summer/winter rule switching, month boundaries, mid-run transition |
 | `tests/test_phase_balance.py` | least/most loaded phase selection, own-load subtraction, ties |
 | `tests/test_full_soc.py` | the full-battery probe: ladder up, dead band, shedding back down |
 | `tests/test_ramp.py` | one heater per hold, fast multi-heater shedding, a steady hour |

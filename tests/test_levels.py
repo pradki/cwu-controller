@@ -63,20 +63,20 @@ feed(params, soc=94, pv=500, battery=900)
 check("SOC 94% -> histereza gaśnie, poziom wraca do 2",
       ctrl._desired_level() == 2 and ctrl.hysteresis_active is False)
 
-# --- długa średnia (15 min) ogranicza to, co pokazuje krótka ---
+# --- długa średnia (3 min) ogranicza to, co pokazuje krótka ---
 clock, pub, params, relay, ctrl = build()
-feed(params, soc=85, pv=1500, battery=-1000, samples=45)   # 15 min: nadwyżka mała
-feed(params, soc=85, pv=1500, battery=-6500, samples=6)    # ostatnie 2 min: chwilowo duża
+feed(params, soc=85, pv=1500, battery=-1000, samples=9)   # 3 min: nadwyżka mała
+feed(params, soc=85, pv=1500, battery=-6500, samples=3)   # ostatnia minuta: chwilowo duża
 check("krótka średnia sama dałaby 2 grzałki", ctrl._level_from_rules(
     85, 1500, params.battery_power.average, 0, ctrl.rules)[0] == 2)
 check("długa średnia ścina poziom do 0", ctrl._desired_level() == 0)
-check("powód mówi, co ograniczyło", "15 min ogranicza" in ctrl.reason)
+check("powód mówi, co ograniczyło", "3 min ogranicza" in ctrl.reason)
 
 # W drugą stronę ograniczenie nie działa: gdy długa średnia jest bogatsza niż
 # krótka, obowiązuje krótka - schodzenie ma być szybkie.
 clock, pub, params, relay, ctrl = build()
-feed(params, soc=85, pv=1500, battery=-6500, samples=45)
-feed(params, soc=85, pv=1500, battery=-1000, samples=6)
+feed(params, soc=85, pv=1500, battery=-6500, samples=9)
+feed(params, soc=85, pv=1500, battery=-1000, samples=3)
 check("spadek nadwyżki widać od razu, długa średnia go nie maskuje",
       ctrl._desired_level() == 0)
 

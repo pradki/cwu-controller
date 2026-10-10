@@ -66,7 +66,7 @@ class FakePublisher:
         return msgs[-1] if msgs else None
 
 
-def build(clock=None, publisher=None, samples=6, long_samples=45, settle_ticks=6,
+def build(clock=None, publisher=None, samples=3, long_samples=9, settle_ticks=3,
           flash_duration=60.0, max_total_load=8000, **kw):
     """Params + RelayClient + CWUController na wspólnym, sterowalnym zegarze.
     Domyślne nastawy jak w config.example.py, żeby testy sprawdzały to, co pojedzie

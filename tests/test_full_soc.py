@@ -16,15 +16,15 @@ check("powód mówi, że to próba", "próbuję dołożyć" in ctrl.reason)
 
 # Grzałka pracuje, bateria wciąż nie oddaje (PV ją pokrywa) - ale dokładamy dopiero
 # po odczekaniu, nie w następnym ticku.
-run(clock, params, relay, ctrl, 100, **dict(SUN, loads=(2500, 400, 300)))
-check("po 100 s wciąż jedna grzałka", relay.requested_count() == 1)
+run(clock, params, relay, ctrl, 40, **dict(SUN, loads=(2500, 400, 300)))
+check("po 40 s wciąż jedna grzałka", relay.requested_count() == 1)
 check("najpierw czekamy, aż średnia obejmie nową grzałkę", "stabilizacj" in ctrl.reason)
 
-run(clock, params, relay, ctrl, 140, **dict(SUN, loads=(2500, 400, 300)))
-check("po 240 s wciąż jedna grzałka", relay.requested_count() == 1)
+run(clock, params, relay, ctrl, 170, **dict(SUN, loads=(2500, 400, 300)))
+check("po 210 s wciąż jedna grzałka", relay.requested_count() == 1)
 check("teraz trzyma nas już tylko odczekanie", "dokładam po jednej" in ctrl.reason)
 
-run(clock, params, relay, ctrl, 80, **dict(SUN, loads=(2500, 400, 300)))
+run(clock, params, relay, ctrl, 100, **dict(SUN, loads=(2500, 400, 300)))
 check("po ~5 min i sprawdzeniu -> druga grzałka", relay.requested_count() == 2)
 
 run(clock, params, relay, ctrl, 320, **dict(SUN, loads=(2500, 2400, 300)))
@@ -57,8 +57,8 @@ check("powód mówi, ile trzymamy", "trzymam" in ctrl.reason)
 
 # --- długa średnia też musi się zgodzić, nie tylko krótka ---
 clock, pub, params, relay, ctrl = build()
-feed(params, soc=100, pv=6000, battery=1500, samples=45)  # 15 min: bateria oddawała
-feed(params, soc=100, pv=6000, battery=0, samples=6)      # ostatnie 2 min: przestała
+feed(params, soc=100, pv=6000, battery=1500, samples=9)  # 3 min: bateria oddawała
+feed(params, soc=100, pv=6000, battery=0, samples=3)     # ostatnia minuta: przestała
 check("długa średnia jeszcze pamięta rozładowanie -> nie dokładamy",
       ctrl._desired_level() == 0)
 

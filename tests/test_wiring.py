@@ -15,16 +15,23 @@ sys.modules["config"] = cfg
 spec.loader.exec_module(cfg)
 
 import main  # noqa: E402  (dopiero po podstawieniu configu z szablonu)
+from datetime import datetime  # noqa: E402
 
 params, mqtt_client, relay, controller = main.build_service(cfg)
+
+# Reguły zależą od pory roku (patrz cwu_controller.CWUController._apply_season) -
+# sprawdzamy więc względem tego, co faktycznie powinno być aktywne teraz, a nie
+# zawsze względem letniego RULES.
+_expected_rules = (cfg.WINTER_RULES if datetime.now().month in cfg.WINTER_MONTHS
+                   else cfg.RULES)
 
 check("trzy grzałki z configu", relay.count == 3)
 check("grzałki na osobnych fazach", [relay.phase(i) for i in range(3)] == [0, 1, 2])
 
 check("komendy idą na topici gatewaya", [relay.cmd_topic(i) for i in range(3)] == [
-    "cave/relay/relay_test/cwu_l1/cmd/cwu-controller",
-    "cave/relay/relay_test/cwu_l2/cmd/cwu-controller",
-    "cave/relay/relay_test/cwu_l3/cmd/cwu-controller",
+    f"cave/relay/{cfg.RELAY_MODULE}/cwu_l1/cmd/cwu-controller",
+    f"cave/relay/{cfg.RELAY_MODULE}/cwu_l2/cmd/cwu-controller",
+    f"cave/relay/{cfg.RELAY_MODULE}/cwu_l3/cmd/cwu-controller",
 ])
 
 check("subskrybujemy parametry falownika i czujniki", set(mqtt_client.param_topics) == {
@@ -49,7 +56,7 @@ check("każdy handler statusu pisze do swojej grzałki",
       [r["channel"] for r in relay._reported] == [0, 1, 2])
 
 check("reguły i progi wzięte z configu",
-      controller.rules == cfg.RULES and controller.max_temp == cfg.MAX_TEMP
+      controller.rules == _expected_rules and controller.max_temp == cfg.MAX_TEMP
       and controller.heater_power == cfg.HEATER_POWER)
 check("okna średnich z configu", params.battery_power.window == cfg.AVERAGE_SAMPLES
       and params.battery_power.long_window == cfg.AVERAGE_SAMPLES_LONG)

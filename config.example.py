@@ -45,9 +45,11 @@ HEATER_POWER = 2000  # W, moc jednej grzałki
 CONTROL_INTERVAL = 20.0   # s, deye publikuje co 20 s - częściej nie ma czego liczyć
 PING_INTERVAL = 20.0      # s, odnawianie sprzętowego impulsu flash_on
 FLASH_DURATION = 60.0     # s, czas impulsu; po tylu sekundach bez pingu kanał gaśnie sam
-AVERAGE_SAMPLES = 6       # 6 x CONTROL_INTERVAL = 2 min - "co jest teraz"
-AVERAGE_SAMPLES_LONG = 45  # 45 x CONTROL_INTERVAL = 15 min - "ile da się utrzymać"
-SETTLE_TICKS = 6          # ile ticków po przełączeniu grzałki nie liczymy poziomu z reguł
+AVERAGE_SAMPLES = 3       # 3 x CONTROL_INTERVAL = 1 min - "co jest teraz"
+AVERAGE_SAMPLES_LONG = 9  # 9 x CONTROL_INTERVAL = 3 min - "ile da się utrzymać"
+SETTLE_TICKS = 3          # ile ticków po przełączeniu grzałki nie liczymy poziomu z reguł -
+                          # dopasowane do AVERAGE_SAMPLES (1 min), żeby nie czekać dłużej niż
+                          # krótka średnia potrzebuje na pełne obrócenie się po zmianie
 
 # Dokładamy najwyżej jedną grzałkę na tyle sekund. Wchodzenie po jednej i z odczekaniem
 # jest po to, żeby przy 3 kW średniej nadwyżki chodziły stale 1-2 grzałki, a nie raz trzy,
@@ -109,3 +111,21 @@ PV_HYSTERESIS_ON = 800
 # ładuje się dalej, a nadwyżkę falownik ucina. Sterownik przechodzi wtedy na dokładanie
 # metodą prób - patrz FULL_SOC_ADD_BELOW i SHED_DISCHARGE_ABOVE.
 SOC_FULL = 99
+
+# === Sezon grzewczy (październik-luty): inny priorytet niż latem ===
+# Marzec-wrzesień używa wyłącznie powyższych RULES/HYSTERESIS_RULE/SOC_*/PV_*
+# (bez zmian). Październik-luty priorytetem jest naładowanie akumulatora -
+# grzejemy tylko przy naprawdę dużej nadwyżce, a histereza "prawie pełnej
+# baterii" jest podniesiona tak wysoko (do SOC_FULL), że w praniu nie ma szans
+# się uruchomić - zanim by to nastąpiło, kontrolę przejmuje gałąź "bateria
+# pełna" (patrz CWUController._desired_level).
+WINTER_MONTHS = {10, 11, 12, 1, 2}
+
+WINTER_RULES = [
+    (40, 6000),
+]
+WINTER_HYSTERESIS_RULE = HYSTERESIS_RULE
+WINTER_SOC_HYSTERESIS_ON = 99
+WINTER_SOC_HYSTERESIS_OFF = 98
+WINTER_PV_HYSTERESIS_ON = 200
+WINTER_SOC_FULL = 99

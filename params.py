@@ -52,8 +52,9 @@ class Averaged(Param):
     sam co w cavecwu: chwilowe zachmurzenie albo przejaśnienie nie ma prawa
     przestawić grzałek.
 
-    Dwa okna, bo odpowiadają na różne pytania: krótkie (2 min) "co jest teraz",
-    długie (15 min) "ile da się utrzymać". Grzałkę dokładamy dopiero wtedy, gdy
+    Dwa okna, bo odpowiadają na różne pytania: krótkie "co jest teraz",
+    długie "ile da się utrzymać" (w cwu-controller domyślnie 1 i 3 min - patrz
+    config.py AVERAGE_SAMPLES/AVERAGE_SAMPLES_LONG). Grzałkę dokładamy dopiero, gdy
     zgadzają się oba - bez tego przy przelotnych chmurach sterownik włączałby trzy
     grzałki i zaraz zero, w rytm słońca.
     """

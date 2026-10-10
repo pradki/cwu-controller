@@ -23,7 +23,7 @@ run(clock, params, relay, ctrl, 320, **BIG_SURPLUS)
 check("i na tym koniec - tyle grzałek jest", relay.requested_count() == 3)
 
 # --- w dół o tyle, ile trzeba, w jednym ticku ---
-feed(params, soc=95, pv=1500, battery=2000, samples=6)   # bilans już tylko na jedną
+feed(params, soc=95, pv=1500, battery=2000, samples=3)   # bilans już tylko na jedną
 ctrl.tick()
 check("spadek nadwyżki zdejmuje od razu dwie grzałki", relay.requested_count() == 1)
 
@@ -33,7 +33,7 @@ feed(params, **BIG_SURPLUS)
 ctrl.tick()                                            # dołożona pierwsza grzałka
 run(clock, params, relay, ctrl, 140, **BIG_SURPLUS)     # przeczekujemy stabilizację średniej
 check("odczekanie na kolejne dołożenie wciąż biegnie", ctrl._ramp_up_wait() > 0)
-feed(params, soc=95, pv=1500, battery=0, samples=6)     # nadwyżka znikła
+feed(params, soc=95, pv=1500, battery=0, samples=3)     # nadwyżka znikła
 ctrl.tick()
 check("mimo biegnącego odczekania grzałka zeszła", relay.requested_count() == 0)
 

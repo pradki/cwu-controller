@@ -25,7 +25,7 @@ BUFF_UPMID_SENSOR = "buff_upmid_temp"
 
 # === Wyjście: waveshare-mqtt-gateway ===
 RELAY_TOPIC_ROOT = "cave/relay"
-RELAY_MODULE = "relay_test"
+RELAY_MODULE = "relay_heating"
 
 # === Wyjście: własny status sterownika (retained) ===
 STATUS_TOPIC = "cave/cwu/status"

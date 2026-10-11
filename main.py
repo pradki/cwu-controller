@@ -102,6 +102,7 @@ def build_service(cfg=config):
         max_temp=cfg.MAX_TEMP,
         settle_ticks=cfg.SETTLE_TICKS,
         ramp_up_hold=cfg.RAMP_UP_HOLD,
+        min_on_time=cfg.MIN_ON_TIME,
         full_soc_add_below=cfg.FULL_SOC_ADD_BELOW,
         shed_discharge_above=cfg.SHED_DISCHARGE_ABOVE,
         max_total_load=cfg.MAX_TOTAL_LOAD,

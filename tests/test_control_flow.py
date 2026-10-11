@@ -54,7 +54,9 @@ ctrl.tick()
 check("po odczekaniu dochodzi dokładnie jedna grzałka", relay.requested_count() == 2)
 
 # --- dogasający przekaźnik wstrzymuje decyzje ---
-clock, pub, params, relay, ctrl = build(settle_ticks=0)
+# min_on_time=0: to osobny mechanizm (patrz test_min_on_time.py), tu badamy
+# wyłącznie wstrzymanie decyzji na czas dogasania sprzętowego impulsu.
+clock, pub, params, relay, ctrl = build(settle_ticks=0, min_on_time=0.0)
 feed(params, **SURPLUS)
 ctrl.tick()
 check("grzałka włączona", relay.requested_count() == 1)

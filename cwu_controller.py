@@ -38,8 +38,15 @@ class CWUController:
       jeśli poziom potwierdza zarówno krótka (1 min) jak i długa (3 min) średnia.
       Chodzi o to, żeby przy 3 kW średniej nadwyżki chodziły stale 1-2 grzałki, a nie
       raz trzy, raz zero, w rytm chmur.
-    - **W dół natychmiast**: zdejmowanie awaryjne nie czeka ani na stabilizację
-      średniej, ani na `ramp_up_hold`, i może schodzić po grzałce na tick.
+    - **W dół zwykle po `min_on_time`**: zwykłe (regułowe) zdjęcie grzałki czeka, aż
+      przepracuje choć `min_on_time` (domyślnie 150 s) - inaczej PV balansujące tuż
+      przy progu reguły włącza i gasi grzałkę co tick, a przekaźnik "strzela".
+      Grzałka, która jeszcze nie wyrobiła minimum, zostaje trzymana, nie zdjęta -
+      kolejny tick spróbuje ponownie.
+    - **Zdejmowanie awaryjne natychmiast**: `_shed_reason` (przeciążenie baterii albo
+      faz) nie czeka ani na stabilizację średniej, ani na `ramp_up_hold`, ani na
+      `min_on_time` - to bezpiecznik przed realnym przeciążeniem sprzętu, nie
+      regulacja, i może schodzić po grzałce na tick.
 
     Po każdej zmianie robi `settle_ticks` ticków przerwy w decyzjach z reguł - dopóki
     średnia nie obejmie nowego stanu, bilans dotyczy poprzedniego układu grzałek, a
@@ -55,6 +62,7 @@ class CWUController:
                  winter_pv_hysteresis_on=None, winter_soc_full=None,
                  winter_months=DEFAULT_WINTER_MONTHS,
                  max_temp=85.0, settle_ticks=6, ramp_up_hold=300.0,
+                 min_on_time=150.0,
                  full_soc_add_below=200.0, shed_discharge_above=None,
                  max_total_load=None, publish_status=None,
                  status_topic="cave/cwu/status", clock=time.monotonic,
@@ -97,6 +105,7 @@ class CWUController:
         self.max_temp = max_temp
         self.settle_ticks = settle_ticks
         self.ramp_up_hold = ramp_up_hold
+        self.min_on_time = min_on_time
         self.full_soc_add_below = full_soc_add_below
         # Domyślnie "moc jednej grzałki": jeśli bateria oddaje więcej, to znaczy, że
         # grzałki jadą z akumulatora (a przy jego limicie - i z sieci), nie z nadwyżki.
@@ -114,6 +123,9 @@ class CWUController:
         self._settle = 0
         self._last_ramp_up = None   # monotonic ostatniego dołożenia grzałki
         self._last_decision = None  # monotonic ostatniego udanego ticku
+        # monotonic ostatniego załączenia każdej grzałki - do min_on_time;
+        # None = grzałka aktualnie nie pracuje (albo jeszcze nigdy nie pracowała)
+        self._on_since = [None] * self.relay.count
 
     # ================= pora roku =================
     def _apply_season(self):
@@ -302,15 +314,37 @@ class CWUController:
                     f"{self.max_total_load:.0f}W)")
         return None
 
+    def _shed_rule_based(self, count):
+        """Zdejmuje do `count` grzałek wg reguł - ale żadnej, która jeszcze nie
+        przepracowała `min_on_time`. Bez tego PV balansujące tuż przy progu
+        reguły włączałoby i gasiło grzałkę co tick, a przekaźnik by "strzelał"
+        (patrz docstring klasy). Trzymana grzałka zostaje po prostu nietknięta -
+        kolejny tick spróbuje ponownie, aż minimum minie."""
+        candidates = self._pick_off(count)
+        now = self._clock()
+        to_off, held = [], []
+        for i in candidates:
+            since = self._on_since[i]
+            if since is not None and now - since < self.min_on_time:
+                held.append(i)
+            else:
+                to_off.append(i)
+
+        for i in to_off:
+            self.relay.request(i, False)
+            self._on_since[i] = None
+        if held:
+            wait = max(self.min_on_time - (now - self._on_since[i]) for i in held)
+            self.reason += f" | trzymam min. czas pracy grzałki jeszcze {wait:.0f}s"
+        if to_off:
+            self._settle = self.settle_ticks
+
     def _apply_level(self, target):
         requested = self.relay.requested_count()
         if target == requested:
             return
         if target < requested:
-            # W dół schodzimy od razu i o tyle, ile trzeba.
-            for i in self._pick_off(requested - target):
-                self.relay.request(i, False)
-            self._settle = self.settle_ticks
+            self._shed_rule_based(requested - target)
             return
 
         blocked = self._ramp_up_block()
@@ -320,6 +354,7 @@ class CWUController:
         # W górę zawsze po jednej grzałce, choćby bilans pozwalał na więcej.
         for i in self._pick_on(1):
             self.relay.request(i, True)
+            self._on_since[i] = self._clock()
         self._last_ramp_up = self._clock()
         self._settle = self.settle_ticks
 
@@ -337,19 +372,23 @@ class CWUController:
             if self.relay.requested_count():
                 LOG.warning("STOP: %s", overheat_reason)
             self.relay.release_all()
+            self._on_since = [None] * self.relay.count
         elif not self.params.inverter_valid:
             self.level = 0
             self.reason = "brak danych z falownika"
             if self.relay.requested_count():
                 LOG.warning("STOP: %s", self.reason)
             self.relay.release_all()
+            self._on_since = [None] * self.relay.count
         else:
             shed = self._shed_reason()
             if shed:
-                # Zdejmowanie awaryjne omija i stabilizację średniej, i ramp_up_hold.
+                # Zdejmowanie awaryjne omija i stabilizację średniej, i ramp_up_hold,
+                # i min_on_time - to bezpiecznik przed przeciążeniem, nie regulacja.
                 LOG.warning("%s", shed)
                 for i in self._pick_off(1):
                     self.relay.request(i, False)
+                    self._on_since[i] = None
                 self._settle = self.settle_ticks
                 self.level = self.relay.requested_count()
                 self.reason = shed

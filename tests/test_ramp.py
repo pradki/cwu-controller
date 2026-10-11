@@ -27,15 +27,18 @@ feed(params, soc=95, pv=1500, battery=2000, samples=3)   # bilans już tylko na 
 ctrl.tick()
 check("spadek nadwyżki zdejmuje od razu dwie grzałki", relay.requested_count() == 1)
 
-# --- odczekanie na dokładanie nie blokuje zdejmowania ---
-clock, pub, params, relay, ctrl = build()
+# --- odczekanie na dokładanie nie blokuje zdejmowania, ale min_on_time owszem ---
+clock, pub, params, relay, ctrl = build(min_on_time=150.0)
 feed(params, **BIG_SURPLUS)
 ctrl.tick()                                            # dołożona pierwsza grzałka
 run(clock, params, relay, ctrl, 140, **BIG_SURPLUS)     # przeczekujemy stabilizację średniej
 check("odczekanie na kolejne dołożenie wciąż biegnie", ctrl._ramp_up_wait() > 0)
 feed(params, soc=95, pv=1500, battery=0, samples=3)     # nadwyżka znikła
-ctrl.tick()
-check("mimo biegnącego odczekania grzałka zeszła", relay.requested_count() == 0)
+ctrl.tick()                                            # grzałka pracuje dopiero 140 s < 150 s
+check("mimo biegnącego odczekania grzałka NIE zeszła - nie wyrobiła min_on_time",
+      relay.requested_count() == 1 and "min. czas pracy" in ctrl.reason)
+run(clock, params, relay, ctrl, 20, soc=95, pv=1500, battery=0)  # teraz 160 s > 150 s
+check("po wyrobieniu min_on_time grzałka wreszcie schodzi", relay.requested_count() == 0)
 
 # --- odczekanie liczy się od ostatniego dołożenia, nie od ostatniej zmiany ---
 clock, pub, params, relay, ctrl = build()

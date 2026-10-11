@@ -44,7 +44,9 @@ HEATER_POWER = 2000  # W, moc jednej grzałki
 # === Czasy ===
 CONTROL_INTERVAL = 20.0   # s, deye publikuje co 20 s - częściej nie ma czego liczyć
 PING_INTERVAL = 20.0      # s, odnawianie sprzętowego impulsu flash_on
-FLASH_DURATION = 60.0     # s, czas impulsu; po tylu sekundach bez pingu kanał gaśnie sam
+FLASH_DURATION = 120.0    # s, czas impulsu; po tylu sekundach bez pingu kanał gaśnie sam.
+                          # 2 min, żeby nawet błyskawiczne zdjęcie żądania (patrz MIN_ON_TIME)
+                          # nie było krótsze niż sprzętowy impuls potrafi utrzymać przekaźnik.
 AVERAGE_SAMPLES = 3       # 3 x CONTROL_INTERVAL = 1 min - "co jest teraz"
 AVERAGE_SAMPLES_LONG = 9  # 9 x CONTROL_INTERVAL = 3 min - "ile da się utrzymać"
 SETTLE_TICKS = 3          # ile ticków po przełączeniu grzałki nie liczymy poziomu z reguł -
@@ -55,6 +57,12 @@ SETTLE_TICKS = 3          # ile ticków po przełączeniu grzałki nie liczymy p
 # jest po to, żeby przy 3 kW średniej nadwyżki chodziły stale 1-2 grzałki, a nie raz trzy,
 # raz zero. Zdejmowanie awaryjne tego nie dotyczy - w dół schodzimy natychmiast.
 RAMP_UP_HOLD = 300.0
+
+# Raz załączona grzałka pracuje co najmniej tyle sekund, zanim zwykłe (regułowe)
+# zdjęcie może ją zgasić - inaczej PV balansujące tuż przy progu reguły (np. zimowe
+# 6000 W) włącza i gasi grzałkę co tick, a przekaźnik "strzela". Zdejmowanie awaryjne
+# (przeciążenie baterii/faz) tego nie dotyczy - to bezpiecznik, nie regulacja.
+MIN_ON_TIME = 150.0
 
 # Po tylu sekundach bez udanego ticku sterowania pętla pingująca przestaje odnawiać
 # impulsy - zawieszone sterowanie ma zgasić grzałki, a nie zamrozić ostatnią decyzję.

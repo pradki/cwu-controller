@@ -62,6 +62,7 @@ check("okna średnich z configu", params.battery_power.window == cfg.AVERAGE_SAM
       and params.battery_power.long_window == cfg.AVERAGE_SAMPLES_LONG)
 check("nastawy ostrożnego dokładania z configu",
       controller.ramp_up_hold == cfg.RAMP_UP_HOLD
+      and controller.min_on_time == cfg.MIN_ON_TIME
       and controller.full_soc_add_below == cfg.FULL_SOC_ADD_BELOW
       and controller.shed_discharge_above == cfg.SHED_DISCHARGE_ABOVE
       and controller.max_total_load == cfg.MAX_TOTAL_LOAD)

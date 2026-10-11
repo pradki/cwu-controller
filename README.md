@@ -84,25 +84,31 @@ whether the battery started lending power.
   whenever the draw is "just under one heater's worth" would add, cross the threshold, shed, and
   repeat forever.
 
-**Hysteresis near a full battery.** Above `SOC 95 %` with more than 800 W coming in, a
-`(94, -1000)` rule is prepended - a *negative* PV threshold, which permits pulling up to 1 kW
-out of the battery to keep the water heating. It stays armed until SOC falls back to 94 %,
-because without that latch the heaters would chatter around the 95 % mark. (October-February
-raises this threshold instead of tuning the rule itself - see "Seasonal rules" below.)
+**Hysteresis near a full battery.** Above `SOC_HYSTERESIS_ON` (99 %, same as `SOC_FULL`) with
+more than `PV_HYSTERESIS_ON` W coming in, a `HYSTERESIS_RULE = (98, -1000)` rule is prepended - a
+*negative* PV threshold, which permits pulling up to 1 kW out of the battery to keep the water
+heating. Since `SOC_HYSTERESIS_ON == SOC_FULL`, the "battery full" branch (`_level_full_soc`,
+below) almost always takes over before this rule gets a chance to decide anything on its own -
+but the hysteresis *latch* (`hysteresis_active`) still matters: once armed above 99 %, it stays
+armed as SOC drifts back down, so the one tick where SOC drops from "full" (>99 %) to just under
+it still finds `hysteresis_active` true and applies this rule instead of falling straight through
+to the plain rule table. It disarms for good once SOC reaches `SOC_HYSTERESIS_OFF` (98 %) - a
+narrow 98-99 % band that keeps a heater running a little longer after the battery stops being
+completely full, rather than cutting it the instant SOC ticks below 99 %. Raised from 95/94 to
+99/98 deliberately: the goal is not discharging the battery for comfort, only for genuine surplus
+the battery can't take anyway.
 
 ### Seasonal rules (October-February prioritizes charging the battery)
 
-March-September uses `RULES`/`HYSTERESIS_RULE`/`SOC_HYSTERESIS_*`/`PV_HYSTERESIS_ON`/`SOC_FULL`
-exactly as described above, unchanged. October-February swaps in a separate
-`WINTER_RULES`/`WINTER_HYSTERESIS_RULE`/`WINTER_SOC_HYSTERESIS_*`/`WINTER_PV_HYSTERESIS_ON`/
-`WINTER_SOC_FULL` set from `config.py`, because in winter the battery charging first matters
-more than diverting every spare watt to hot water:
+March-September uses `RULES`/`PV_HYSTERESIS_ON` as described above; `HYSTERESIS_RULE`/
+`SOC_HYSTERESIS_*`/`SOC_FULL` are now the same numbers in both seasons (see above - the point of
+raising them was battery longevity year-round, not just in winter). October-February still swaps
+in separate `WINTER_RULES`/`WINTER_PV_HYSTERESIS_ON` from `config.py`, because in winter the
+battery charging first matters more than diverting every spare watt to hot water:
 
 ```python
 WINTER_RULES = [(40, 6000)]   # only soc > 40% and surplus > 6 kW heats at all
-WINTER_SOC_HYSTERESIS_ON = 99   # and WINTER_SOC_FULL = 99: raised high enough that the
-WINTER_SOC_HYSTERESIS_OFF = 98  # "battery full" branch (_level_full_soc) takes over before
-WINTER_PV_HYSTERESIS_ON = 200   # the hysteresis rule would ever actually fire
+WINTER_PV_HYSTERESIS_ON = 200 # less surplus required to arm hysteresis than summer's 800 W
 ```
 
 `CWUController._apply_season()` picks the active set by the current month on **every tick**
@@ -278,13 +284,22 @@ since `config.py` normally holds a real LAN address).
   surplus table described above.
 - **`WINTER_RULES`**, **`WINTER_HYSTERESIS_RULE`**, **`WINTER_SOC_*`**, **`WINTER_PV_HYSTERESIS_ON`**,
   **`WINTER_MONTHS`** - the October-February overrides, see "Seasonal rules" above. Any left unset
-  falls back to its March-September value.
+  falls back to its March-September value (`WINTER_HYSTERESIS_RULE`/`WINTER_SOC_*` currently equal
+  their March-September counterparts explicitly, since both seasons now protect the battery the
+  same way - only `WINTER_RULES`/`WINTER_PV_HYSTERESIS_ON` actually differ).
 - **`FLASH_DURATION`** / **`PING_INTERVAL`** - the off-latency vs. outage-tolerance trade-off.
-  Keep the pulse comfortably longer than the ping interval.
+  Keep the pulse comfortably longer than the ping interval, and at least as long as `MIN_ON_TIME`
+  (below) - a pulse shorter than the minimum run time it's meant to guarantee would defeat it.
 - **`AVERAGE_SAMPLES`** / **`AVERAGE_SAMPLES_LONG`** / **`SETTLE_TICKS`** - the two smoothing
   windows, and how long to sit still after a change. All three count ticks of `CONTROL_INTERVAL`.
 - **`RAMP_UP_HOLD`** - minimum seconds between two additions. Lower it if the ramp feels too
   timid on clear mornings; it has no effect on shedding.
+- **`MIN_ON_TIME`** - seconds a heater must run before an ordinary rule-based drop can shed it
+  again (150 s by default). Without this, PV hovering right at a rule's threshold flips the
+  desired level on and off every tick, and the relay audibly "fires" rapidly. A heater that
+  hasn't reached this minimum is simply held - and retried - instead of shed outright. Emergency
+  shedding (`SHED_DISCHARGE_ABOVE`/`MAX_TOTAL_LOAD`) and the hard safety stops (overheat, no
+  inverter data) ignore it completely; it only softens the ordinary rule-table path.
 - **`MAX_TOTAL_LOAD`** - the inverter's rating, in watts. `None` disables the ceiling (also what
   happens automatically when `load_power_l*` is missing).
 - **`SHED_DISCHARGE_ABOVE`** / **`FULL_SOC_ADD_BELOW`** - how much battery discharge is tolerated

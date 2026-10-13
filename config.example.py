@@ -113,15 +113,23 @@ RULES = [
 # wyciśnięcie ostatniego wata z PV tuż pod pełnym naładowaniem. OFF musi być
 # niższe niż ON (pasmo histerezy) - samo podniesienie OFF bez ON zostawiłoby
 # wyłączanie efektywnie przy ON, bo _update_hysteresis sprawdza ON jako drugi i
-# nadpisuje OFF z powrotem na True, dopóki SOC > ON.
+# nadpisuje OFF z powrotem na True, dopóki SOC > ON. Zostaje przy ścisłym ">" -
+# w odróżnieniu od SOC_FULL niżej, tutaj to bez znaczenia (patrz tam), więc nie
+# ma powodu zmieniać generycznego, konstruktorowego zachowania tego progu.
 HYSTERESIS_RULE = (98, -1000)
 SOC_HYSTERESIS_ON = 99
 SOC_HYSTERESIS_OFF = 98
 PV_HYSTERESIS_ON = 800
 
-# Powyżej tego SOC bilans mocy przestaje cokolwiek mówić: pełna bateria po prostu nie
-# ładuje się dalej, a nadwyżkę falownik ucina. Sterownik przechodzi wtedy na dokładanie
-# metodą prób - patrz FULL_SOC_ADD_BELOW i SHED_DISCHARGE_ABOVE.
+# Od tego SOC (włącznie) bilans mocy przestaje cokolwiek mówić: bateria zaczyna
+# ograniczać przyjmowaną moc, więc nie da się już policzyć poziomu z nadwyżki -
+# sterownik przechodzi na dokładanie metodą prób (patrz FULL_SOC_ADD_BELOW i
+# SHED_DISCHARGE_ABOVE). >=, nie > - SOC z falownika to pełne procenty (99, 100,
+# bez wartości pośrednich), więc samo ">" czekałoby na pewne 100% i przez cały
+# ostatni punkt procentowy (99->100) nie próbowałoby w ogóle dogrzewać, mimo że
+# PV mogło mieć spory zapas ponad to, co bateria jeszcze przyjmowała - metoda
+# prób i tak cofa się sama (FULL_SOC_ADD_BELOW/SHED_DISCHARGE_ABOVE), jeśli przy
+# 99% okaże się, że zapasu jednak nie ma.
 SOC_FULL = 99
 
 # === Sezon grzewczy (październik-luty): inny priorytet niż latem ===
@@ -130,15 +138,18 @@ SOC_FULL = 99
 # zrównał się z SOC_FULL). Październik-luty priorytetem jest naładowanie
 # akumulatora - grzejemy tylko przy naprawdę dużej nadwyżce.
 #
-# SOC_HYSTERESIS_ON == SOC_FULL (99) w obu sezonach, więc sama histereza
-# praktycznie nigdy nie decyduje wprost - gałąź "bateria pełna" (SOC > SOC_FULL,
-# patrz CWUController._desired_level) przejmuje kontrolę pierwsza. Histereza
-# dostaje jednak jedną szansę: gdy SOC spada spod 99% w dół, zanim osiągnie
-# SOC_HYSTERESIS_OFF (98), `hysteresis_active` z poprzedniego ticku (gdy SOC
-# było jeszcze > 99%) wciąż obowiązuje - to wąskie pasmo 98-99% to jedyne
-# miejsce, gdzie HYSTERESIS_RULE faktycznie coś robi, i jest tu celowo: trzyma
-# grzałki jeszcze chwilę po zejściu z pełnego naładowania, zamiast gasić je od
-# razu przy pierwszym tiku poniżej 99%.
+# SOC_HYSTERESIS_ON == SOC_FULL (99) w obu sezonach, ale SOC_FULL sprawdzane jest
+# przez >= (patrz wyżej), a SOC_HYSTERESIS_ON wciąż przez ścisłe > - więc gałąź
+# "bateria pełna" (CWUController._desired_level) przejmuje kontrolę już przy SOC
+# == 99, zanim histereza w ogóle zdążyłaby się włączyć (jej własny próg wymaga
+# SOC > 99, czyli 100). To, którym operatorem porównuje się sama histereza, nie
+# ma więc żadnego znaczenia przy tej konkretnej konfiguracji - `_level_from_rules`
+# (i razem z nim HYSTERESIS_RULE) nie jest przy SOC_FULL == SOC_HYSTERESIS_ON
+# osiągalne z żadnej strony. To nie czyni SOC_HYSTERESIS_ON/OFF/HYSTERESIS_RULE
+# martwym kodem w ogóle - `CWUController` wspiera różne wartości obu progów
+# (patrz domyślne `soc_hysteresis_on=95` w konstruktorze, niżej od `soc_full=99`),
+# tylko akurat w tym configu, z oboma na 99, histereza nie ma już własnego
+# zakresu do obsłużenia.
 WINTER_MONTHS = {10, 11, 12, 1, 2}
 
 WINTER_RULES = [

@@ -70,12 +70,21 @@ Worked example: `SOC 85 %`, averaged PV `1.5 kW`, battery charging at `4.2 kW`, 
 running. Rule `(80, 1000)` matches, so `level = int((-4200 + 1000) / -2000) = int(1.6) = 1` -
 one heater, and roughly 2.2 kW of charging left for the battery.
 
-**A full battery has no balance to read.** Above `SOC_FULL` (99 %) the arithmetic above stops
-working: a full battery simply stops charging and the inverter curtails the rest, so
-`battery_power` sits at zero no matter how much sun is going spare. `cavecwu` handled that by
-switching on everything, which is how you end up with 6 kW of heaters on a house that was
-already drawing 6 kW. Instead the controller probes: add **one** heater, wait, and look at
-whether the battery started lending power.
+**A full-enough battery has no balance to read.** From `SOC_FULL` (99 %) **up** (`soc >=
+SOC_FULL`, not `>`) the arithmetic above stops being reliable: the battery's charge current is
+already being throttled by this point, so `battery_power` no longer tells you how much more
+surplus is actually available - it just reflects whatever reduced rate the battery happens to be
+accepting right then. `cavecwu` handled the fully-full case by switching on everything, which is
+how you end up with 6 kW of heaters on a house that was already drawing 6 kW. Instead the
+controller probes: add **one** heater, wait, and look at whether the battery started lending
+power.
+
+`>=`, not `>`, is deliberate: the inverter reports SOC in whole percent only (99, 100, nothing
+between), so a strict `>` would wait for a confirmed 100 % before probing at all - sitting out the
+entire 99->100 % stretch even when the panels had plenty of room to spare above whatever reduced
+rate the battery was accepting. Probing one point earlier costs nothing extra: it only ever adds a
+heater when the battery genuinely isn't drawing on it (below), and backs off immediately the
+moment it is.
 
 - Battery drawing less than `FULL_SOC_ADD_BELOW` (200 W) on **both** the 1- and 3-minute
   average - the heaters that run are covered by production, so try one more.
@@ -84,19 +93,24 @@ whether the battery started lending power.
   whenever the draw is "just under one heater's worth" would add, cross the threshold, shed, and
   repeat forever.
 
-**Hysteresis near a full battery.** Above `SOC_HYSTERESIS_ON` (99 %, same as `SOC_FULL`) with
-more than `PV_HYSTERESIS_ON` W coming in, a `HYSTERESIS_RULE = (98, -1000)` rule is prepended - a
-*negative* PV threshold, which permits pulling up to 1 kW out of the battery to keep the water
-heating. Since `SOC_HYSTERESIS_ON == SOC_FULL`, the "battery full" branch (`_level_full_soc`,
-below) almost always takes over before this rule gets a chance to decide anything on its own -
-but the hysteresis *latch* (`hysteresis_active`) still matters: once armed above 99 %, it stays
-armed as SOC drifts back down, so the one tick where SOC drops from "full" (>99 %) to just under
-it still finds `hysteresis_active` true and applies this rule instead of falling straight through
-to the plain rule table. It disarms for good once SOC reaches `SOC_HYSTERESIS_OFF` (98 %) - a
-narrow 98-99 % band that keeps a heater running a little longer after the battery stops being
-completely full, rather than cutting it the instant SOC ticks below 99 %. Raised from 95/94 to
-99/98 deliberately: the goal is not discharging the battery for comfort, only for genuine surplus
-the battery can't take anyway.
+**Hysteresis near a full battery.** Above `SOC_HYSTERESIS_ON` (99 %, same as `SOC_FULL`, but still
+checked with a strict `soc > SOC_HYSTERESIS_ON` - this one was deliberately *not* switched to
+`>=`, see below) with more than `PV_HYSTERESIS_ON` W coming in, a `HYSTERESIS_RULE = (98, -1000)`
+rule would be prepended to the plain rule table - a *negative* PV threshold, which permits pulling
+up to 1 kW out of the battery to keep the water heating. With the current config this rule never
+actually gets to decide anything, regardless of which operator it uses: `SOC_HYSTERESIS_ON ==
+SOC_FULL` (99), and `SOC_FULL`'s own `>=` already claims SOC 99 for the "battery full" branch
+(`_level_full_soc`, above) before `_level_from_rules` (where the inserted rule would apply) is
+ever reached - so whether the hysteresis's own threshold would, on its own, arm at 99 or only at
+100 makes no observable difference here either way. That's exactly why only `SOC_FULL` changed:
+touching `SOC_HYSTERESIS_ON`'s comparator too would have been a no-op for *this* config, but it
+would also apply everywhere else `CWUController` is used with different values (its own
+constructor defaults to `soc_hysteresis_on=95`, well below `soc_full=99`) - and the test suite
+relies on that generic default staying exactly as strict as before. `SOC_HYSTERESIS_OFF` (98 %)
+still matters for one thing regardless of any of this: it's what clears `hysteresis_active` back
+to `False` on the way down, so a lingering `True` doesn't out-live the climb to full the next time
+SOC rises again. Raised from 95/94 to 99/98 deliberately: the goal is not discharging the battery
+for comfort, only for genuine surplus the battery can't take anyway.
 
 ### Seasonal rules (October-February prioritizes charging the battery)
 

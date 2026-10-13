@@ -62,4 +62,28 @@ feed(params, soc=100, pv=6000, battery=0, samples=3)     # ostatnia minuta: prze
 check("długa średnia jeszcze pamięta rozładowanie -> nie dokładamy",
       ctrl._desired_level() == 0)
 
+# --- próg to >= SOC_FULL, nie > - 99% to już "pełna bateria" metodą prób -----
+# Falownik raportuje SOC w pełnych procentach (99, 100, nic pomiędzy), więc ścisłe
+# ">" czekałoby na pewne 100% i przegapiałoby cały punkt procentowy 99->100, w
+# którym PV mogło mieć zapas ponad to, co bateria jeszcze przyjmowała (patrz
+# README "A full-enough battery has no balance to read"). soc_hysteresis_on/off
+# podane jawnie, zgodnie z rzeczywistym config.py (99/98), a nie z domyślnymi
+# z konstruktora (95/94) - inaczej histereza uzbroiłaby się tu przypadkiem, bez
+# związku z tym, co ten test właściwie sprawdza.
+clock, pub, params, relay, ctrl = build(soc_hysteresis_on=99, soc_hysteresis_off=98)
+feed(params, soc=99, pv=6000, battery=0, loads=(500, 400, 300))
+ctrl.tick()
+check("SOC == SOC_FULL (99%), bateria nie oddaje -> też pierwsza grzałka metodą prób",
+      relay.requested_count() == 1)
+check("powód mówi o próbie, nie o regule bilansu", "próbuję dołożyć" in ctrl.reason)
+
+# --- punkt niżej (98%) to już zwykłe reguły bilansu mocy, nie metoda prób -----
+clock, pub, params, relay, ctrl = build(soc_hysteresis_on=99, soc_hysteresis_off=98)
+feed(params, soc=98, pv=6000, battery=-4000, loads=(500, 400, 300))
+# SOC 98 <= soc_hysteresis_off (98) -> histereza na pewno nieuzbrojona, więc
+# liczy się zwykła reguła (90, 400): (-4000 + 400) / -2000 = 1.8 -> 1
+check("SOC 98% liczony z bilansu nadwyżki (reguły), nie metodą prób",
+      ctrl._desired_level() == 1 and "pełn" not in ctrl.reason
+      and "próbuję dołożyć" not in ctrl.reason)
+
 done()

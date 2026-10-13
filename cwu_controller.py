@@ -250,7 +250,7 @@ class CWUController:
         if self.hysteresis_active:
             rules.insert(0, self.hysteresis_rule)
 
-        if soc > self.soc_full:
+        if soc >= self.soc_full:
             level, reason = self._level_full_soc(self.relay.requested_count())
             self.reason = reason
             return level
